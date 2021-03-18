@@ -1,0 +1,219 @@
+#!/usr/bin/env python3
+
+
+"""
+This node runs the frontier exploration using slam_toolbox on a map allowing the turtlebot3 to thouroughly explore the map
+"""
+from geometry_msgs.msg import Twist, Vector3, Transform, TransformStamped, Quaternion
+from std_msgs.msg import String
+from nav_msgs.msg import OccupancyGrid
+import rospy
+import numpy as np
+import actionlib
+import tf2_ros
+import math
+import random
+from move_base_msgs.msg import MoveBaseAction, MoveBaseGoal
+from PIL import Image
+from nav_msgs.srv import GetMap
+
+
+#Perform Sobel operation on image to get the image gradient
+def imageGradient(image):
+
+    mag = np.zeros((image.shape[0], image.shape[1]))
+    theta = np.zeros((image.shape[0], image.shape[1]))
+
+    Gx = np.array([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]])
+    Gy = np.array([[1, 2, 1], [0, 0, 0], [-1, -2, -1]])
+
+    for r in range(1, len(image) - 2):
+        for c in range(1, len(image[0]) - 2):
+            imageSeg = image[r - 1:r + 2, c - 1:c + 2]
+
+            Ix = np.dot(Gx, imageSeg).sum()
+            Iy = np.dot(Gy, imageSeg).sum()
+
+            mag[r, c] = math.sqrt(Ix**2 + Iy**2)
+            theta[r, c] = math.atan2(Iy, Ix)
+
+    return mag,theta
+
+
+if __name__ == '__main__':
+
+    rospy.init_node('frontierExploration')
+
+    tf2Broad = tf2_ros.TransformBroadcaster()
+    tf2Buff = tf2_ros.Buffer()
+    MoveBaseClient = actionlib.SimpleActionClient("move_base", MoveBaseAction)
+    MoveBaseClient.wait_for_server()
+
+    #Uncomment this if you want to save the map from slam_toolbox for the initial iteration
+    #saveMap = True
+    while not rospy.is_shutdown():
+       
+        #Getting map data from the /map topic,this map is 1D list map value generated from slam_toolbox where 100 = occupied cell, 0 = unoccupied cell, -1 =unknown cell.  We want to find all cells that lie between unoccupied and unknown.  These are frontier cells
+        mapData = rospy.wait_for_message('/map', OccupancyGrid)
+        #mapData = rospy.wait_for_message('/slam_toolbox/dynamic_map/map', OccupancyGrid)
+        map1D = mapData.data
+        w = mapData.info.width
+        h = mapData.info.height
+        res = mapData.info.resolution
+        orig = mapData.info.origin
+
+
+        sizeOfMap = len(map1D)
+        rospy.loginfo(f"w is {w}")
+        rospy.loginfo(f"h is {h}")
+        rospy.loginfo(f"length of all of map is {sizeOfMap}")
+
+        #Build a 2D numpy array representation a grayscale image of the map 100 = occupied, 0 = unoccupied, unknown = -1
+        map2D = np.zeros((h,w))
+    
+        
+        for r in range(h):
+            for c in range(w):
+                map2D[h -r - 1, c] = map1D[w * r + c]
+        newMap2Ddisplay = np.zeros((h, w))
+        for r in range(len(map2D)):
+            for c in range(len(map2D[0])):
+                if map2D[r, c] == 0:
+                    newMap2Ddisplay[r, c] = 255
+                if map2D[r, c] == -1:
+                    newMap2Ddisplay[r, c] = 128
+                if map2D[r, c] == 100:
+                    newMap2Ddisplay[r, c] = 0
+
+        #code to say a grayscale image of the map from slam_toolbox            
+        '''
+        if saveMap:
+            img = Image.fromarray(np.uint8(newMap2Ddisplay), 'L')
+            img.save("/home/chen2156/mapfromslamtoolbox.png")
+        '''
+
+
+        rospy.loginfo(f"origin of occupancy grid ({orig.position.x}, {orig.position.y})")
+        rospy.loginfo(f"resolution of occupancy grid is {res}")
+        #Transform map frame to lower left corner of map data
+        trans = Transform(translation=Vector3(x=orig.position.x, y=orig.position.y, z=0), rotation=Quaternion(x=0, y=0, z=0, w=1))
+        stampedTrans = TransformStamped()
+        stampedTrans.header.stamp = rospy.Time.now()
+        stampedTrans.header.frame_id = "map"
+        stampedTrans.child_frame_id = "lower_left"
+        stampedTrans.transform = trans
+
+        tf2Broad.sendTransform(stampedTrans)
+
+        #Replace unknown value(-1) with 255 and occupied value(100) with 128 so that I only select high gradients between unoccupied and unknown
+
+        newMap2D = np.zeros((h, w))
+        for r in range(len(map2D)):
+            for c in range(len(map2D[0])):
+                if map2D[r, c] == 0:
+                    newMap2D[r, c] = 255
+                if map2D[r, c] == -1:
+                    newMap2D[r, c] = 0
+                if map2D[r, c] == 100:
+                    newMap2D[r, c] = 128
+
+        #Code to save 2D map with unknown cells emphasized
+        '''
+        if saveMap:
+            img = Image.fromarray(np.uint8(newMap2D), 'L')	
+            img.save("/home/chen2156/exploredMap.png")
+        '''    
+        #Get image gradient of the new2Dmap
+
+        mag, theta = imageGradient(newMap2D)
+
+
+        #Code to display 2D map of image gradient, showing possible edges between unoccupied and unknown cells.  Uncomment to generate image file
+        '''
+        if saveMap:
+            img = Image.fromarray(np.uint8(mag), 'L')
+            img.save("/home/chen2156/imageGradient.png")
+            saveMap = False
+        '''    
+        #Get Data from GlobalcostMap
+
+        global_costmap = rospy.wait_for_message('/move_base/global_costmap/costmap', OccupancyGrid)
+        globalMapData = global_costmap.data
+        gw = global_costmap.info.width
+        gh = global_costmap.info.height
+
+        #Build 2D numpy array map from Globalcostmap
+        global2Dmap = np.zeros((gh, gw))
+
+        for r in range(gh):
+            for c in range(gw):
+                global2Dmap[gh - r - 1, c] = globalMapData[gw * r + c]
+
+        #find cell positions with a high gradient, and lowest cost(avoiding walls and obstacles)
+
+
+        cx = 0
+        cy = h
+        possiblePose = []
+        #mincost = global2Dmap[0, 0]
+        for r in range(h):
+            for c in range(w):
+                if mag[r, c] > 150 and global2Dmap[r, c] < 30:
+                        #cx = c
+                        #cy = h - r
+                        #mincost = global2Dmap[r, c]
+                        possiblePose.append((c, h - r))
+
+        #prevent robot from getting stuck at frontier edge as well as prevent robot from running into obstacles
+        if len(possiblePose) != 0:
+            (cx, cy) = random.choice(possiblePose)
+
+        #allows robot to explore more regions once a subregion is done being explored   
+        else:
+            minCost = 0
+            cx = 0
+            cy = h
+            mincost = global2Dmap[0, 0]
+            for r in range(h):
+                for c in range(w):
+                    if mag[r, c] > 150 and global2Dmap[r, c] < mincost:
+                        cx = c
+                        cy = h - r
+                        mincost = global2Dmap[r, c]
+
+        #rospy.loginfo("lowest cost frontier cell is " + str((cx, cy)))
+        rospy.loginfo("chosen frontier cell is " + str((cx, cy)))
+        #send transform of the lower left corner to goal
+
+        Trans2 = Transform(translation=Vector3(x=cx * res, y=cy * res,z=0), rotation=Quaternion(x=0, y=0, z=0, w=1))
+        Trans2Stamped = TransformStamped()
+        Trans2Stamped.header.stamp = rospy.Time.now()
+        Trans2Stamped.header.frame_id = "lower_left"
+        Trans2Stamped.child_frame_id = "goal"
+        Trans2Stamped.transform = Trans2
+        tf2Broad.sendTransform(Trans2Stamped)
+
+
+
+        
+        #send transform to move_base and wait for turtlebot3 to complete trajectory
+        end = MoveBaseGoal()
+        end.target_pose.header.frame_id = "map"
+        end.target_pose.header.stamp = rospy.Time.now()
+        end.target_pose.pose.position.x = cx * res + orig.position.x
+        end.target_pose.pose.position.y = cy * res + orig.position.y
+        end.target_pose.pose.orientation.w = 1.0
+
+
+        MoveBaseClient.send_goal(end)
+
+        #wait for robot to finish trajectory
+        
+        wait = MoveBaseClient.wait_for_result()
+
+        if not wait:
+            rospy.loginfo("Server not available")
+            rospy.signal_shutdown("Server not available")
+
+
+        
