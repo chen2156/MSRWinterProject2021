@@ -11,7 +11,7 @@
 
 	<?ignore	
 	<include file="$(find turtlebot3_navigation)/launch/turtlebot3_navigation.launch">
-		<arg name="map_file" value="/home/chen2156/mapofturtlebothouse.yaml"/>
+		<arg name="map_file" value="$(find turltlebotDraw)/config/mapofturtlebothouse.yaml"/>
 	</include>
 	?>
 
