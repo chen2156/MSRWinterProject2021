@@ -1,0 +1,550 @@
+#!/usr/bin/env python3
+'''
+This node figures out what waypoints the turtlebot3 needs to move to in order to trace the image, moves the robot to those waypoints, and displays the path
+'''
+from geometry_msgs.msg import Twist, Vector3, Transform, TransformStamped, Point, Quaternion, Pose, PoseWithCovarianceStamped, PoseStamped
+from std_msgs.msg import String
+from nav_msgs.msg import OccupancyGrid, Path
+import rospy
+import numpy as np
+import actionlib
+import tf2_ros
+import math
+import random
+from move_base_msgs.msg import MoveBaseAction, MoveBaseGoal
+from PIL import Image
+from nav_msgs.srv import GetMap
+from scipy.signal import convolve2d
+import cv2
+import sys
+import bisect
+
+#Source : https://www.pyimagesearch.com/2015/04/06/zero-parameter-automatic-canny-edge-detection-with-python-and-opencv/
+def autoCanny(im, sigma=0.33):
+    # compute the median of the single channel pixel intensities
+    v = np.median(im)
+    # apply automatic Canny edge detection using the computed median
+    lower = int(max(0, (1.0 - sigma) * v))
+    upper = int(min(255, (1.0 + sigma) * v))
+    edged = cv2.Canny(im, lower, upper)
+    # return the edged image
+    return edged
+
+def convertImagetoPoints(im, centroid):
+    Visited = np.zeros((im.shape[0], im.shape[1]), dtype=bool)
+    points = []
+    currPoint = (0, 0)
+    for r in range(im.shape[0]):
+        for c in range(im.shape[1]):
+            if im[r, c] > 150:
+                points.append((r, c))
+                currPoint = (r, c)
+                Visited[r, c] = 1
+    finished = False
+    
+    rospy.loginfo("Starting to figure out waypoints")
+    while not finished:
+        (r, c) = currPoint
+        Option1 = None
+        Option2 = None
+        Option3 = None
+        Option4 = None
+        Option5 = None
+        Option6 = None
+        Option7 = None
+        Option8 = None
+        if r > 0 and c > 0:
+            Option1 = (r - 1, c - 1)
+        if r > 0:
+            Option2 = (r - 1, c)
+        if r > 0 and c < im.shape[1] - 1:
+            Option3 = (r - 1, c + 1)
+        if c > 0:
+            Option4 = (r, c - 1)
+        if c < im.shape[1] - 1:
+            Option5 = (r, c + 1)
+        if r < im.shape[0] - 1 and c > 0:
+            Option6 = (r + 1, c - 1)
+        if c < im.shape[1] - 1:
+            Option7 = (r, c + 1)
+        if r < im.shape[0] - 1 and c < im.shape[1] - 1:
+            Option8 = (r + 1, c + 1)
+        maxR = 0
+        maxC = 0
+        maxValue = 0
+        optionSelect = 0
+        if Option1 != None and not Visited[Option1] and im[Option1] > 150:
+            maxValue = im[Option1]
+            maxR = Option1[0]
+            maxC = Option1[1]
+            optionSelect = 1
+        if Option2 != None and im[Option2] > maxValue and not Visited[Option2] and im[Option2] > 150:
+            maxValue = im[Option2]
+            maxR = Option2[0]
+            maxC = Option2[1]
+            optionSelect = 2
+        if Option3 != None and im[Option3] > maxValue and not Visited[Option3] and im[Option3] > 150:
+            maxValue = im[Option3]
+            maxR = Option3[0]
+            maxC = Option3[1]
+            optionSelect = 3
+        if Option4 != None and im[Option4] > maxValue and not Visited[Option4] and im[Option4] > 150:
+            maxValue = im[Option4]
+            maxR = Option4[0]
+            maxC = Option4[1]
+            optionSelect = 4
+        if Option5 != None and im[Option5] > maxValue and not Visited[Option5] and im[Option5] > 150:
+            maxValue = im[Option5]
+            maxR = Option5[0]
+            maxC = Option5[1]
+            optionSelect = 5
+        if Option6 != None and im[Option6] > maxValue and not Visited[Option6] and im[Option6] > 150:
+            maxValue = im[Option6]
+            maxR = Option6[0]
+            maxC = Option6[1]
+            optionSelect = 6
+        if Option7 != None and im[Option7] > maxValue and not Visited[Option7] and im[Option7] > 150:
+            maxValue = im[Option7]
+            maxR = Option7[0]
+            maxC = Option7[1]
+            optionSelect = 7
+        if Option8 != None and im[Option8] > maxValue and not Visited[Option8] and im[Option8] > 150:
+            maxValue = im[Option8]
+            maxR = Option8[0]
+            maxC = Option8[1]
+            optionSelect = 8
+
+        rospy.loginfo("Option Selected is " + str(optionSelect))
+        if not Visited[maxR, maxC]:
+            rospy.loginfo("More edge to trace")
+            points.append((maxR, maxC))
+            currPoint = (maxR, maxC)
+            Visited[maxR, maxC] = 1
+        
+        else:
+            rospy.loginfo("Checking for more letters to trace")
+            moreEdge = False
+            for r in range(im.shape[0]):
+                for c in range(im.shape[1]):
+                    if im[r, c] > 150 and Visited[r, c] == 0:
+                        points.append((r, c))
+                        currPoint = (r, c)
+                        moreEdge = True
+                        Visited[r, c] = 1
+            
+            if not moreEdge:
+                rospy.loginfo("No more letters to trace")
+                finished = True
+            else:
+                rospy.loginfo("More letters to trace")
+
+    angles = []
+    sortedIndex = []
+    sortedPoints = []
+    for i in range(len(points)):
+        ang = math.atan2(points[i][1] - centroid[1] , points[i][0] - centroid[0])
+        bisect.insort(angles, ang)
+        sortedIndex.insert(angles.index(ang), i)
+
+    rospy.loginfo("Angles to centroid are: " + str(angles))
+    for ind in sortedIndex:
+        sortedPoints.append(points[ind])
+    rospy.loginfo("Sorted Points are " + str(sortedPoints))
+    return sortedPoints
+
+                
+
+if __name__ == '__main__':
+
+    rospy.init_node('DrawPath')
+
+    tf2Broad = tf2_ros.TransformBroadcaster()
+    tf2Buff = tf2_ros.Buffer()
+    MoveBaseClient = actionlib.SimpleActionClient("move_base", MoveBaseAction)
+    MoveBaseClient.wait_for_server()
+    
+    path = Path()
+    path_pub = rospy.Publisher('path', Path, queue_size=10)
+    path.poses = []
+
+    rospy.loginfo("Give robot initial pose")
+    initPose = rospy.wait_for_message('/initialpose', PoseWithCovarianceStamped)
+    #Uncomment this if you want to save the map from slam_toolbox for the initial iteration
+    saveMap = True
+
+    rate = rospy.Rate(60)
+    while not rospy.is_shutdown():
+        #Getting map data from the /map topic,this map is 1D list map value generated from slam_toolbox where 100 = occupied cell, 0 = unoccupied cell, -1 =unknown cell.  We want to find all cells that lie between unoccupied and unknown.  These are frontier cells
+        mapData = rospy.wait_for_message('/map', OccupancyGrid)
+        #mapData = rospy.wait_for_message('/slam_toolbox/dynamic_map/map', OccupancyGrid)
+        map1D = mapData.data
+        w = mapData.info.width
+        h = mapData.info.height
+        res = mapData.info.resolution
+        orig = mapData.info.origin
+
+
+        sizeOfMap = len(map1D)
+        rospy.loginfo(f"w is {w}")
+        rospy.loginfo(f"h is {h}")
+        rospy.loginfo(f"length of all of map is {sizeOfMap}")
+
+        #Build a 2D numpy array representation a grayscale image of the map 100 = occupied, 0 = unoccupied, unknown = -1
+        map2D = np.zeros((h,w))
+    
+        
+        for r in range(h):
+            for c in range(w):
+                map2D[h -r - 1, c] = map1D[w * r + c]
+        newMap2Ddisplay = np.zeros((h, w))
+        for r in range(len(map2D)):
+            for c in range(len(map2D[0])):
+                if map2D[r, c] == 0:
+                    newMap2Ddisplay[r, c] = 255
+                if map2D[r, c] == -1:
+                    newMap2Ddisplay[r, c] = 128
+                if map2D[r, c] == 100:
+                    newMap2Ddisplay[r, c] = 0
+
+
+        #code to say a grayscale image of the map from slam_toolbox            
+        
+        if saveMap:
+            img = Image.fromarray(np.uint8(newMap2Ddisplay), 'L')
+            img.save("/home/chen2156/regeneratedmapfromslamtoolbox.png")
+    
+
+        rospy.loginfo(f"origin of occupancy grid ({orig.position.x}, {orig.position.y})")
+        rospy.loginfo(f"resolution of occupancy grid is {res}")
+        #Transform map frame to lower left corner of map data
+        trans = Transform(translation=Vector3(x=orig.position.x, y=orig.position.y, z=0), rotation=Quaternion(x=0, y=0, z=0, w=1))
+        stampedTrans = TransformStamped()
+        stampedTrans.header.stamp = rospy.Time.now()
+        stampedTrans.header.frame_id = "map"
+        stampedTrans.child_frame_id = "lower_left"
+        stampedTrans.transform = trans
+
+        tf2Broad.sendTransform(stampedTrans)
+
+        #Replace the image file path with the file path of the image you want to trace
+        picFile = "/home/chen2156/WinterProject/catkin_ws/src/turltlebotDraw/node/octagon.png"
+        TraceImageasnp = np.array(Image.open(picFile).convert('L'))
+
+        if saveMap:
+            img = Image.fromarray(np.uint8(TraceImageasnp), 'L')
+            img.save("/home/chen2156/inputTrace.png")
+        rospy.loginfo("Type of TraceImageasnp is " + str(type(TraceImageasnp)))
+        EdgeImage = autoCanny(TraceImageasnp)
+        
+        ret, thresh = cv2.threshold(TraceImageasnp, 127, 255, 0)
+        M = cv2.moments(thresh)
+
+        cX = int(M["m10"] / M["m00"])
+        cY = int(M["m01"] / M["m00"])
+
+        rospy.loginfo("NumRows of image is " + str(EdgeImage.shape[0]))
+        rospy.loginfo("NumCols of image is " + str(EdgeImage.shape[1]))
+        rospy.loginfo("Centroid of image is " + str((cX, cY)))
+        #indices = np.where(EdgeImage != [0])
+        #wayPoints = list(zip(indices[0], indices[1]))
+        '''
+        dst = cv2.cornerHarris(TraceImageasnp,2,3,0.04)
+        dst = cv2.dilate(dst, None)
+        ret, dst = cv2.threshold(dst, 0.01 * dst.max(), 255, 0)
+        dst = np.uint8(dst)
+        ret, labels, stats, centroids = cv2.connectedComponentsWithStats(dst)
+        criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 100, 0.001)
+        corners = cv2.cornerSubPix(TraceImageasnp,np.float32(centroids),(5,5), (-1,-1),criteria)
+        rospy.loginfo("Corners are " + str(corners))
+        newCorners = corners[1:]
+        angles = []
+        sortedIndexes = []
+        wayPoints = []
+        for i in range(len(newCorners)):
+            ang = math.atan2(newCorners[i][1] - cY, newCorners[i][0] - cX)
+            bisect.insort(angles, ang)
+            sortedIndexes.insert(angles.index(ang), i)
+        for i in range(len(newCorners)):
+            wayPoints.append(newCorners[sortedIndexes[i]])
+        '''    
+        wayPoints = convertImagetoPoints(EdgeImage, (cX, cY))
+        rospy.loginfo("Waypoints are " + str(wayPoints))
+
+        if (0, 0) in wayPoints:
+            wayPoints.remove((0, 0))
+            
+        if saveMap:
+            img = Image.fromarray(np.uint8(EdgeImage), 'L')
+            img.save("/home/chen2156/edgesofInputImage.png")
+            saveMap = False
+
+        global_costmap = rospy.wait_for_message('/move_base/global_costmap/costmap', OccupancyGrid)
+        globalMapData = global_costmap.data
+        gw = global_costmap.info.width
+        gh = global_costmap.info.height
+
+        #Build 2D numpy array map from Globalcostmap
+        global2Dmap = np.zeros((gh, gw))
+
+        for r in range(gh):
+            for c in range(gw):
+                global2Dmap[gh - r - 1, c] = globalMapData[gw * r + c]        
+
+        (imNumRows, imNumCols) = TraceImageasnp.shape
+        if imNumRows > h or imNumCols > w:
+            rospy.loginfo("Image is too big to be drawn on map")
+            break
+
+        canFit = False
+        rowLoc = 0
+        colLoc = 0
+        for r in range(h - imNumRows):
+            for c in range(c - imNumCols):
+                imageRegion = map2D[r:r + imNumRows, c:c + imNumCols]
+                canFit = np.all((imageRegion == 0))
+                if canFit:
+                    rospy.loginfo("Image can be drawn on map")
+                    rowLoc = r
+                    colLoc = c
+                    break
+
+            if canFit:
+                break
+        if not canFit:
+            rospy.loginfo("Can't find enough consecutive unoccupied space to trace image")
+            break
+
+        else:
+            rospy.loginfo("There is enough consecutive unoccupied space to trace image!")
+
+        rospy.loginfo("Length of waypoints is " + str(len(wayPoints)))
+        index = 0        
+        for p in wayPoints:
+            rospy.loginfo("Current Index is " + str(index))
+            rospy.loginfo("Total Number of waypoints is " + str(len(wayPoints)))
+            (r, c) = p
+            rospy.loginfo("Moving Point is " + str(p))
+            end = MoveBaseGoal()
+            end.target_pose.header.frame_id = "map"
+            end.target_pose.header.stamp = rospy.Time.now()
+            end.target_pose.pose.position.x = (colLoc + c) * res + orig.position.x
+            end.target_pose.pose.position.y = (h - (rowLoc + r)) * res + orig.position.y
+
+            rospy.loginfo(end.target_pose.pose.position.x)
+            rospy.loginfo(end.target_pose.pose.position.y)
+            end.target_pose.pose.orientation.w = 1.0
+
+            rospy.loginfo("Moving robot to starting point")
+            MoveBaseClient.send_goal(end)
+            path.header.stamp = rospy.Time.now()
+            path.header.frame_id = "map"
+            path.poses.append(PoseStamped(header=path.header, pose=Pose(position=Point(end.target_pose.pose.position.x, end.target_pose.pose.position.y, 0), orientation=Quaternion(0, 0, 0, 1))))
+
+            path_pub.publish(path)
+            wait = MoveBaseClient.wait_for_result()
+
+            if not wait:
+                rospy.loginfo("Server not available")
+                rospy.signal_shutdown("Server not available")
+            index += 1    
+            rate.sleep()    
+            
+
+
+        '''
+        rospy.loginfo("Location of upper left corner of image where map is drawn is " + str((rowLoc, colLoc)))
+        mapPointr = 0
+        mapPointc = 0
+        for r in range(EdgeImage.shape[0]):
+            for c in range(EdgeImage.shape[1]):
+                if EdgeImage[r, c] > 150:
+                    mapPointr = r
+                    mapPointc = c
+        end = MoveBaseGoal()
+        end.target_pose.header.frame_id = "map"
+        end.target_pose.header.stamp = rospy.Time.now()
+        end.target_pose.pose.position.x = mapPointc * res + orig.position.x
+        end.target_pose.pose.position.y = (h - mapPointr) * res + orig.position.y
+         
+        rospy.loginfo(end.target_pose.pose.position.x)
+        rospy.loginfo(end.target_pose.pose.position.y)
+        end.target_pose.pose.orientation.w = 1.0
+
+        rospy.loginfo("Moving robot to starting point")
+        MoveBaseClient.send_goal(end)
+
+        wait = MoveBaseClient.wait_for_result()
+
+        if not wait:
+            rospy.loginfo("Server not available")
+            rospy.signal_shutdown("Server not available")
+
+        Visited = np.zeros((EdgeImage.shape[0], EdgeImage.shape[1]), dtype=bool)
+        Visited[r, c] = 1
+        path.header.stamp = rospy.Time.now()
+        path.header.frame_id = "map"
+        path.poses.append(PoseStamped(header=path.header, pose=Pose(position=Point(end.target_pose.pose.position.x, end.target_pose.pose.position.y, 0), orientation=Quaternion(0, 0, 0, 1))))
+
+        path_pub.publish(path)
+        Drawn = False
+        '''
+
+        
+
+
+        '''
+        while not Drawn:
+            Option1 = None
+            Option2 = None
+            Option3 = None
+            Option4 = None
+            Option5 = None
+            Option6 = None
+            Option7 = None
+            Option8 = None
+
+            if r > 0 and c > 0:
+                Option1 = (r - 1, c - 1)
+            if r > 0:
+                Option2 = (r - 1, c)
+            if r > 0 and c < EdgeImage.shape[1] - 1:
+                Option3 = (r - 1, c + 1)
+            if c > 0:
+                Option4 = (r, c - 1)
+            if c < EdgeImage.shape[1] - 1:
+                Option5 = (r, c + 1)
+            if r < EdgeImage.shape[0] - 1 and c > 0:
+                Option6 = (r + 1, c - 1)
+            if c < EdgeImage.shape[1] - 1:
+                Option7 = (r, c + 1)
+            if r < EdgeImage.shape[0] - 1 and c < EdgeImage.shape[1] - 1:
+                Option8 = (r + 1, c + 1)
+            maxR = 0
+            maxC = 0
+            maxValue = 0
+            optionSelect = 0
+            if Option1 != None:
+                maxValue = EdgeImage[Option1]
+                maxR = Option1[0]
+                maxC = Option1[1]
+                optionSelect = 1
+            if Option2 != None and EdgeImage[Option2] > maxValue:
+                maxValue = EdgeImage[Option2]
+                maxR = Option2[0]
+                maxC = Option2[1]
+                optionSelect = 2
+            if Option3 != None and EdgeImage[Option3] > maxValue:
+                maxValue = EdgeImage[Option3]
+                maxR = Option3[0]
+                maxC = Option3[1]
+                optionSelect = 3
+            if Option4 != None and EdgeImage[Option4] > maxValue:
+                maxValue = EdgeImage[Option4]
+                maxR = Option4[0]
+                maxC = Option4[1]
+                optionSelect = 4
+            if Option5 != None and EdgeImage[Option5] > maxValue:
+                maxValue = EdgeImage[Option5]
+                maxR = Option5[0]
+                maxC = Option5[1]
+                optionSelect = 5
+            if Option6 != None and EdgeImage[Option6] > maxValue:
+                maxValue = EdgeImage[Option6]
+                maxR = Option6[0]
+                maxC = Option6[1]
+                optionSelect = 6
+            if Option7 != None and EdgeImage[Option7] > maxValue:
+                maxValue = EdgeImage[Option7]
+                maxR = Option7[0]
+                maxC = Option7[1]
+                optionSelect = 7
+            if Option8 != None and EdgeImage[Option8] > maxValue:
+                maxValue = EdgeImage[Option8]
+                maxR = Option8[0]
+                maxC = Option8[1]
+                optionSelect = 8
+
+            rospy.loginfo("Option selected is " + str(optionSelect))    
+            
+            rospy.loginfo("Check if there are more of edge to trace")
+            if not Visited[maxR, maxC]:
+                rospy.loginfo("More edge to trace")
+                end = MoveBaseGoal()
+                end.target_pose.header.frame_id = "map"
+                end.target_pose.header.stamp = rospy.Time.now()
+                end.target_pose.pose.position.x = maxC * res + orig.position.x
+                end.target_pose.pose.position.y = (h - maxR) * res + orig.position.y
+                end.target_pose.pose.orientation.w = 1.0
+                path.header.stamp = rospy.Time.now()
+                path.header.frame_id = "map"
+                path.poses.append(PoseStamped(header=path.header, pose=Pose(position=Point(end.target_pose.pose.position.x, end.target_pose.pose.position.y, 0), orientation=Quaternion(0, 0, 0, 1))))
+
+                path_pub.publish(path)
+
+                rospy.loginfo("Moving Robot")
+                MoveBaseClient.send_goal(end)
+        
+                #wait for robot to finish trajectory
+
+                wait = MoveBaseClient.wait_for_result()
+    
+                if not wait:
+                    rospy.loginfo("Server not available")
+                    rospy.signal_shutdown("Server not available")
+
+                Visited[maxR, maxC] = True
+
+            else:
+                rospy.loginfo("Letter is finished being traced")
+                moreLetters = False
+                for r in range(EdgeImage.shape[0]):
+                    for c in range(EdgeImage.shape[1]):
+                        if EdgeImage[r, c] > 150 and Visited[r, c] == False:
+                            moreLetters = True
+                            break
+    
+                if not moreLetters:
+                    rospy.loginfo("No More Letters to trace")
+                    Drawn = True
+                
+                else:
+                    rospy.loginfo("More Letters to trace")
+                    minCost = sys.maxsize 
+                    nextR = 0
+                    nextC = 0
+                    for r in range(EdgeImage.shape[0]):
+                        for c in range(EdgeImage.shape[1]):
+                            if EdgeImage[r, c] > 150 and Visited[r, c] == False and global2Dmap[r + rowLoc, c + colLoc] < minCost:
+                                nextR = r
+                                nextC = c
+                                minCost = global2Dmap[r, c]
+                                
+                    end = MoveBaseGoal()
+                    end.target_pose.header.frame_id = "map"
+                    end.target_pose.header.stamp = rospy.Time.now()
+                    end.target_pose.pose.position.x = nextC * res + orig.position.x
+                    end.target_pose.pose.position.y = (h - nextR) * res + orig.position.y
+                    end.target_pose.pose.orientation.w = 1.0
+
+
+                    MoveBaseClient.send_goal(end)
+                    path.header.stamp = rospy.Time.now()
+                    path.header.frame_id = "map"
+                    path.poses.append(PoseStamped(header=path.header, pose=Pose(position=Point(end.target_pose.pose.position.x, end.target_pose.pose.position.y, 0), orientation=Quaternion(0, 0, 0, 1))))
+
+                    path_pub.publish(path)                    
+                    #wait for robot to finish trajectory
+
+                    wait = MoveBaseClient.wait_for_result()
+                    Visited[nextR, nextC] = True
+                    if not wait:
+                        rospy.loginfo("Server not available")
+                        rospy.signal_shutdown("Server not available")
+
+                    rate.sleep() 
+        '''         
+    
+
+
+
+                
