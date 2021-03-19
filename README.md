@@ -38,7 +38,7 @@ Depending on what gazebo file was used in the launch file, you will get a robot 
 
 <h2>In-between directions</h2>
 
-Once you believe that the map is sufficently explored, you can call the map_server to save the map file.  In this repo, the map for the turtlebot3 house is saved in the newturtlebot3 directpry.  You can save the map by running 
+Once you believe that the map is sufficently explored, you can call the map_server to save the map file.  In this repo, the map for the turtlebot3 house is saved in the newturtlebot3 directory.  You can save the map by running 
 
 `rosrun map_server map_saver -f <name of map file> `
 
