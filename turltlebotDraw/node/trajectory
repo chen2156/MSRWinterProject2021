@@ -227,7 +227,7 @@ if __name__ == '__main__':
         tf2Broad.sendTransform(stampedTrans)
 
         #Replace the image file path with the file path of the image you want to trace
-        picFile = "/home/chen2156/WinterProject/catkin_ws/src/turltlebotDraw/node/octagon.png"
+        picFile = "/home/chen2156/WinterProject/catkin_ws/src/WinterProject/turltlebotDraw/node/octagon.png"
         TraceImageasnp = np.array(Image.open(picFile).convert('L'))
 
         if saveMap:
