@@ -6,7 +6,8 @@
   	<arg name="map_file" default="$(find turltlebotDraw)/config/mapofturtlebothouse.yaml"/>
   	<arg name="open_rviz" default="true"/>
   	<arg name="move_forward_only" default="false"/>
-
+  	
+	<!--Change the call to the launch file to whatever world you will used to run frontier explorer-->
 	<include file="$(find turtlebot3_gazebo)/launch/turtlebot3_house.launch"/>
 
 	<?ignore	
