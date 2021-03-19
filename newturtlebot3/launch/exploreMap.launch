@@ -1,6 +1,6 @@
 <launch>
 
-
+	<!--You can switch between which gazebo file you want to run the turtlebot3 in, make sure to comment the other one out -->
 	<include file="$(find turtlebot3_gazebo)/launch/turtlebot3_house.launch"/>
 	<!--include file="$(find turtlebot3_gazebo)/launch/turtlebot3_world.launch"-->
 
