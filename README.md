@@ -1,6 +1,6 @@
 <h1>Turtlebot3 frontier explorer with shape tracing</h1>
 
-<h2>Frontier explorer on Turtlbot3</h2>
+<h2>Frontier explorer on Turtlebot3</h2>
 
 Before running thie code, make sure you have turtlebot3_simulation downloaded and installed in the src directory of the ROS workspace
 
@@ -9,6 +9,7 @@ Link to <a href="https://github.com/ROBOTIS-GIT/turtlebot3_simulations" target="
 Go to the ROS workspace folder where the two packages are stored and run
 
 `export TURTLEBOT3_MODEL=burger`
+
 `roslaunch newturtlebot3 exploreMap.launch`
 
 Depending on what gazebo file was used in the launch file, you will get a robot that starts exploring all frontiers on the map.  
@@ -36,6 +37,8 @@ Depending on what gazebo file was used in the launch file, you will get a robot 
 10. Go back to the first step and keep doing this until the map is done being explored
 
 <h2>In-between directions</h2>
+
+
 
 
 
