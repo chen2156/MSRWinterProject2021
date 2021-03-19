@@ -1,6 +1,7 @@
 <h1>Turtlebot3 frontier explorer with shape tracing</h1>
 
 <h2>Frontier explorer on Turtlbot3</h2>
+
 Before running thie code, make sure you have turtlebot3_simulation downloaded and installed in the src directory of the ROS workspace
 
 Link to <a href="https://github.com/ROBOTIS-GIT/turtlebot3_simulations" target="_top">turtlebot3_simulations</a>
