@@ -76,7 +76,7 @@ This will run both a gazebo and rviz simulation with whatever map you used to ru
 
 10. Keep looping through map coordinates until you reached the end
 
-
+Results may vary depending on what map you used and what shape you decide to use trace with.  I uploaded some additional shapes located in the node directory that work with the mapofturtlebothouse.yaml file.
 
 
 
